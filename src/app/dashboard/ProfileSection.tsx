@@ -71,7 +71,6 @@ export default function ProfileSection({
 
   return (
     <SectionCard
-      id="profile"
       title="My Profile"
       description="Help Jay tailor your lessons. You can update these anytime."
     >

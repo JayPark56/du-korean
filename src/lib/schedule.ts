@@ -156,15 +156,30 @@ export function tzAbbreviation(weekStart: string) {
   return part?.value ?? "MT";
 }
 
-/** Formats a timestamp in Denver time, e.g. for "last updated". */
+const MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Formats a timestamp in Denver time, e.g. "9월 11일 오후 7:36" / "Sep 11, 7:36 PM".
+ * Only numeric parts come from Intl; the words are ours, because ICU builds differ
+ * (Node rendered "PM" where browsers render "오후"), which broke hydration.
+ */
 export function formatTimestamp(timestamp: string, locale: Locale) {
-  return new Intl.DateTimeFormat(locale === "ko" ? "ko-KR" : "en-US", {
-    timeZone: TIMEZONE,
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: TIMEZONE,
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(timestamp))
+      .map((part) => [part.type, part.value]),
+  );
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const time = formatTime(`${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}`, locale);
+  return locale === "ko" ? `${month}월 ${day}일 ${time}` : `${MONTHS_EN[month - 1]} ${day}, ${time}`;
 }
 
 export type TimeBlock = { day: Day; start: string; end: string; keys: string[] };

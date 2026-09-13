@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Avatar from "@/components/Avatar";
 import ProfileModal from "@/components/ProfileModal";
+import { selectHashTab, useHash } from "@/lib/hashTabs";
 import type { Locale } from "@/lib/schedule";
 import { createClient } from "@/lib/supabase/client";
 import { Spinner } from "./ui";
 
-type NavLink = { href: string; label: string };
+/** `href` is a route ("/admin") or an in-page hash tab ("#schedule"). `badge` shows a red dot. */
+type NavLink = { href: string; label: string; badge?: boolean };
 export type NavUser = { id: string; name: string; avatarPath: string | null; bio: string };
 
 export default function Navbar({
@@ -26,11 +28,12 @@ export default function Navbar({
   user: NavUser;
   logoutLabel: string;
   badge?: string;
-  /** Where the avatar/name links to. Without it, clicking opens the profile modal. */
+  /** Where the avatar/name goes (route or hash tab). Without it, clicking opens the profile modal. */
   profileHref?: string;
   locale?: Locale;
 }) {
   const pathname = usePathname();
+  const hash = useHash();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -54,11 +57,59 @@ export default function Navbar({
     requestAnimationFrame(() => profileTriggerRef.current?.focus());
   }
 
+  // Hash tabs: the first one is active when the hash matches none of them.
+  const hashTabs = links.filter((link) => link.href.startsWith("#")).map((link) => link.href);
+  const activeHash = hashTabs.includes(hash) ? hash : hashTabs[0];
+
   const isActive = (href: string) => {
-    const path = href.split("#")[0];
-    if (href.includes("#")) return false;
-    return path === homeHref ? pathname === path : pathname.startsWith(path);
+    if (href.startsWith("#")) return href === activeHash;
+    return href === homeHref ? pathname === href : pathname.startsWith(href);
   };
+
+  const renderLink = (href: string, className: string, children: ReactNode, extra?: { title?: string }) =>
+    href.startsWith("#") ? (
+      <a
+        href={href}
+        title={extra?.title}
+        aria-current={isActive(href) ? "page" : undefined}
+        onClick={(e) => {
+          e.preventDefault();
+          selectHashTab(href);
+        }}
+        className={className}
+      >
+        {children}
+      </a>
+    ) : (
+      <Link href={href} title={extra?.title} aria-current={isActive(href) ? "page" : undefined} className={className}>
+        {children}
+      </Link>
+    );
+
+  // Red dot for unseen changes; hidden while that page is open. Inline styles so it
+  // renders even with an outdated stylesheet.
+  const linkContent = (link: NavLink) => (
+    <>
+      {link.label}
+      {link.badge && !isActive(link.href) && (
+        <span
+          role="img"
+          aria-label={locale === "ko" ? "새 변경사항" : "New changes"}
+          data-badge=""
+          style={{
+            position: "absolute",
+            top: 4,
+            right: 2,
+            width: 8,
+            height: 8,
+            borderRadius: 9999,
+            background: "#ef4444",
+            boxShadow: "0 0 0 2px #fff",
+          }}
+        />
+      )}
+    </>
+  );
 
   const profileLabel = locale === "ko" ? "내 프로필 수정" : "My profile";
   const profileTriggerClass =
@@ -91,25 +142,23 @@ export default function Navbar({
 
         <nav className="hidden items-center gap-1 md:flex">
           {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                isActive(link.href)
-                  ? "bg-brand-50 text-brand-700"
-                  : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
-              }`}
-            >
-              {link.label}
-            </Link>
+            <span key={link.href} className="contents">
+              {renderLink(
+                link.href,
+                `relative rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  isActive(link.href)
+                    ? "bg-brand-50 text-brand-700"
+                    : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+                }`,
+                linkContent(link),
+              )}
+            </span>
           ))}
         </nav>
 
         <div className="flex items-center gap-2">
           {profileHref ? (
-            <Link href={profileHref} title={profileLabel} className={profileTriggerClass}>
-              {profileTriggerContent}
-            </Link>
+            renderLink(profileHref, profileTriggerClass, profileTriggerContent, { title: profileLabel })
           ) : (
             <button
               ref={profileTriggerRef}
@@ -138,15 +187,15 @@ export default function Navbar({
       {/* Mobile: links in a scrollable row under the header */}
       <nav className="flex gap-1 overflow-x-auto border-t border-stone-100 px-3 py-1.5 md:hidden">
         {links.map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-              isActive(link.href) ? "bg-brand-50 text-brand-700" : "text-stone-600 hover:bg-stone-100"
-            }`}
-          >
-            {link.label}
-          </Link>
+          <span key={link.href} className="contents">
+            {renderLink(
+              link.href,
+              `relative shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                isActive(link.href) ? "bg-brand-50 text-brand-700" : "text-stone-600 hover:bg-stone-100"
+              }`,
+              linkContent(link),
+            )}
+          </span>
         ))}
       </nav>
 

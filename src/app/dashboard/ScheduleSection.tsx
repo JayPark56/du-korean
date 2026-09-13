@@ -102,7 +102,6 @@ export default function ScheduleSection({ userId }: { userId: string }) {
 
   return (
     <SectionCard
-      id="schedule"
       title="Schedule"
       description="Mark every time you could meet. Times Jay is also free are outlined in blue."
       action={

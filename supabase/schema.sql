@@ -1,6 +1,7 @@
 -- =====================================================================
 -- DU Korean Program — database schema + Row Level Security
--- Run this once in Supabase Dashboard → SQL Editor (safe to re-run).
+-- Run this in Supabase Dashboard → SQL Editor. Safe to re-run: it also
+-- upgrades databases created by earlier versions of this file.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -44,15 +45,81 @@ create table if not exists public.availability (
   unique (user_id, week_start)
 );
 
--- One editable lesson request per student.
+-- Lesson requests: one per student per week (week_start = Monday, Denver calendar).
 create table if not exists public.topic_requests (
-  id         uuid primary key default gen_random_uuid(),
-  user_id    uuid not null unique references public.users (id) on delete cascade,
-  content    text not null default '' check (char_length(content) <= 5000),
-  updated_at timestamptz not null default now()
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            uuid not null references public.users (id) on delete cascade,
+  week_start         date not null,
+  main_topic         text not null,
+  additional_details text not null default '',
+  updated_at         timestamptz not null default now()
+);
+
+-- Upgrade from the original shape (a single free-text "content" per student):
+-- the first line becomes main_topic, the rest additional_details, and the week
+-- is the one the request was last edited in. Empty requests are dropped.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'topic_requests' and column_name = 'content'
+  ) then
+    alter table public.topic_requests add column if not exists week_start date;
+    alter table public.topic_requests add column if not exists main_topic text;
+    alter table public.topic_requests add column if not exists additional_details text not null default '';
+    alter table public.topic_requests disable trigger user; -- keep original updated_at
+
+    delete from public.topic_requests where btrim(content, E' \t\r\n') = '';
+
+    update public.topic_requests t
+    set week_start = (date_trunc('week', t.updated_at at time zone 'America/Denver'))::date,
+        main_topic = case when char_length(m.first_line) <= 300 then m.first_line
+                          else left(m.first_line, 299) || '…' end,
+        additional_details = case when char_length(m.first_line) <= 300 then m.rest else m.body end
+    from (
+      select id,
+             body,
+             btrim(split_part(body, E'\n', 1), E' \t\r') as first_line,
+             case when strpos(body, E'\n') > 0
+                  then btrim(substr(body, strpos(body, E'\n') + 1), E' \t\r\n')
+                  else '' end as rest
+      from (select id, btrim(content, E' \t\r\n') as body from public.topic_requests) b
+    ) m
+    where m.id = t.id;
+
+    alter table public.topic_requests enable trigger user;
+    alter table public.topic_requests alter column week_start set not null;
+    alter table public.topic_requests alter column main_topic set not null;
+    alter table public.topic_requests drop constraint if exists topic_requests_user_id_key;
+    alter table public.topic_requests drop column content;
+  end if;
+end;
+$$;
+
+alter table public.topic_requests drop constraint if exists topic_requests_week_monday_check;
+alter table public.topic_requests add constraint topic_requests_week_monday_check
+  check (extract(isodow from week_start) = 1);
+alter table public.topic_requests drop constraint if exists topic_requests_main_topic_check;
+alter table public.topic_requests add constraint topic_requests_main_topic_check
+  check (char_length(btrim(main_topic)) between 1 and 300);
+alter table public.topic_requests drop constraint if exists topic_requests_details_check;
+alter table public.topic_requests add constraint topic_requests_details_check
+  check (char_length(additional_details) <= 5000);
+alter table public.topic_requests drop constraint if exists topic_requests_user_week_key;
+alter table public.topic_requests add constraint topic_requests_user_week_key unique (user_id, week_start);
+
+-- When the admin last looked at each area; drives the red dots in the admin navbar.
+create table if not exists public.admin_seen (
+  admin_id uuid not null references public.users (id) on delete cascade,
+  area     text not null check (area in ('schedule', 'requests')),
+  seen_at  timestamptz not null default now(),
+  primary key (admin_id, area)
 );
 
 create index if not exists availability_week_start_idx on public.availability (week_start);
+create index if not exists availability_updated_at_idx on public.availability (updated_at desc);
+create index if not exists topic_requests_week_start_idx on public.topic_requests (week_start);
+create index if not exists topic_requests_updated_at_idx on public.topic_requests (updated_at desc);
 
 -- ---------------------------------------------------------------------
 -- updated_at maintenance
@@ -116,9 +183,11 @@ from auth.users u
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------
--- Role helper. SECURITY DEFINER so policies on public.users can call it
--- without recursing into their own RLS.
+-- Helpers
 -- ---------------------------------------------------------------------
+
+-- Role check. SECURITY DEFINER so policies on public.users can call it
+-- without recursing into their own RLS.
 create or replace function public.is_admin(uid uuid default auth.uid())
 returns boolean
 language sql
@@ -129,11 +198,36 @@ as $$
   select exists (select 1 from public.users where id = uid and role = 'admin');
 $$;
 
+-- Lesson requests can only be written for the current or next week (Denver calendar).
+create or replace function public.is_editable_request_week(week date)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select week between (date_trunc('week', now() at time zone 'America/Denver'))::date
+                  and (date_trunc('week', now() at time zone 'America/Denver'))::date + 7;
+$$;
+
+-- Admin marks an area as seen (uses the database clock, like updated_at).
+create or replace function public.mark_admin_seen(seen_area text)
+returns void
+language sql
+set search_path = ''
+as $$
+  insert into public.admin_seen (admin_id, area, seen_at)
+  values (auth.uid(), seen_area, now())
+  on conflict (admin_id, area) do update set seen_at = excluded.seen_at;
+$$;
+
+revoke all on function public.mark_admin_seen(text) from public, anon;
+grant execute on function public.mark_admin_seen(text) to authenticated;
+
 -- ---------------------------------------------------------------------
 -- Privileges: nothing for anonymous visitors; signed-in users may only
 -- edit their own name / level / goals / photo / bio (never role or email).
 -- ---------------------------------------------------------------------
-revoke all on public.users, public.availability, public.topic_requests from anon;
+revoke all on public.users, public.availability, public.topic_requests, public.admin_seen from anon;
 
 revoke insert, update, delete on public.users from authenticated;
 grant select on public.users to authenticated;
@@ -141,6 +235,8 @@ grant update (name, korean_level, goals, avatar_url, bio) on public.users to aut
 
 grant select, insert, update, delete on public.availability to authenticated;
 grant select, insert, update, delete on public.topic_requests to authenticated;
+revoke delete on public.admin_seen from authenticated;
+grant select, insert, update on public.admin_seen to authenticated;
 
 -- ---------------------------------------------------------------------
 -- Row Level Security
@@ -148,6 +244,7 @@ grant select, insert, update, delete on public.topic_requests to authenticated;
 alter table public.users          enable row level security;
 alter table public.availability   enable row level security;
 alter table public.topic_requests enable row level security;
+alter table public.admin_seen     enable row level security;
 
 -- users: read yourself; admin reads everyone. Update only yourself.
 drop policy if exists "users_select_self_or_admin" on public.users;
@@ -188,7 +285,8 @@ create policy "availability_delete_own" on public.availability
   for delete to authenticated
   using (user_id = (select auth.uid()));
 
--- topic_requests: read/write your own; admin reads everything.
+-- topic_requests: read all your own weeks; admin reads everything.
+-- Write only your own rows, and only for the current or next week.
 drop policy if exists "topic_requests_select" on public.topic_requests;
 create policy "topic_requests_select" on public.topic_requests
   for select to authenticated
@@ -197,18 +295,35 @@ create policy "topic_requests_select" on public.topic_requests
 drop policy if exists "topic_requests_insert_own" on public.topic_requests;
 create policy "topic_requests_insert_own" on public.topic_requests
   for insert to authenticated
-  with check (user_id = (select auth.uid()));
+  with check (user_id = (select auth.uid()) and public.is_editable_request_week(week_start));
 
 drop policy if exists "topic_requests_update_own" on public.topic_requests;
 create policy "topic_requests_update_own" on public.topic_requests
   for update to authenticated
-  using (user_id = (select auth.uid()))
-  with check (user_id = (select auth.uid()));
+  using (user_id = (select auth.uid()) and public.is_editable_request_week(week_start))
+  with check (user_id = (select auth.uid()) and public.is_editable_request_week(week_start));
 
 drop policy if exists "topic_requests_delete_own" on public.topic_requests;
 create policy "topic_requests_delete_own" on public.topic_requests
   for delete to authenticated
-  using (user_id = (select auth.uid()));
+  using (user_id = (select auth.uid()) and public.is_editable_request_week(week_start));
+
+-- admin_seen: only the admin, only their own rows.
+drop policy if exists "admin_seen_select" on public.admin_seen;
+create policy "admin_seen_select" on public.admin_seen
+  for select to authenticated
+  using (admin_id = (select auth.uid()) and (select public.is_admin()));
+
+drop policy if exists "admin_seen_insert" on public.admin_seen;
+create policy "admin_seen_insert" on public.admin_seen
+  for insert to authenticated
+  with check (admin_id = (select auth.uid()) and (select public.is_admin()));
+
+drop policy if exists "admin_seen_update" on public.admin_seen;
+create policy "admin_seen_update" on public.admin_seen
+  for update to authenticated
+  using (admin_id = (select auth.uid()) and (select public.is_admin()))
+  with check (admin_id = (select auth.uid()) and (select public.is_admin()));
 
 -- ---------------------------------------------------------------------
 -- Storage: profile photos ("avatars" bucket)

@@ -10,12 +10,13 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <Navbar
         homeHref="/dashboard"
         user={{ id: profile.id, name: profile.name, avatarPath: profile.avatar_url, bio: profile.bio }}
-        profileHref="/dashboard#profile"
+        profileHref="#profile"
         logoutLabel="Log out"
         links={[
-          { href: "/dashboard#schedule", label: "Schedule" },
-          { href: "/dashboard#profile", label: "My Profile" },
-          { href: "/dashboard#requests", label: "Lesson Requests" },
+          // In-page tabs (see DashboardTabs); the first is the default.
+          { href: "#schedule", label: "Schedule" },
+          { href: "#requests", label: "Lesson Requests" },
+          { href: "#profile", label: "My Profile" },
         ]}
       />
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">{children}</main>

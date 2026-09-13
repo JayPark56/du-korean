@@ -3,8 +3,9 @@ import Link from "next/link";
 import Avatar from "@/components/Avatar";
 import { PageHeader } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
-import { currentWeekStart, formatTimestamp, slotsToKeys } from "@/lib/schedule";
+import { currentWeekStart, formatWeekRange, slotsToKeys } from "@/lib/schedule";
 import { createClient } from "@/lib/supabase/server";
+import type { TopicRequest } from "@/lib/types";
 
 export const metadata: Metadata = { title: "학생 목록 · DU Korean Program" };
 
@@ -15,14 +16,22 @@ export default async function AdminStudentsPage() {
 
   const [studentsRes, requestsRes, availabilityRes] = await Promise.all([
     supabase.from("users").select("*").eq("role", "student").order("name"),
-    supabase.from("topic_requests").select("*"),
+    supabase
+      .from("topic_requests")
+      .select("*")
+      .order("week_start", { ascending: false })
+      .order("updated_at", { ascending: false }),
     supabase.from("availability").select("user_id, available_slots").eq("week_start", weekStart),
   ]);
   const error = studentsRes.error ?? requestsRes.error ?? availabilityRes.error;
   if (error) throw new Error(`데이터를 불러오지 못했습니다: ${error.message}`);
 
   const students = studentsRes.data ?? [];
-  const requestByUser = new Map((requestsRes.data ?? []).map((r) => [r.user_id, r]));
+  // Latest week's request per student (rows are already sorted newest first).
+  const latestRequestByUser = new Map<string, TopicRequest>();
+  for (const request of requestsRes.data ?? []) {
+    if (!latestRequestByUser.has(request.user_id)) latestRequestByUser.set(request.user_id, request);
+  }
   const hoursByUser = new Map(
     (availabilityRes.data ?? []).map((a) => [a.user_id, slotsToKeys(a.available_slots).size / 2]),
   );
@@ -38,7 +47,7 @@ export default async function AdminStudentsPage() {
       ) : (
         <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
           {students.map((student) => {
-            const request = requestByUser.get(student.id);
+            const request = latestRequestByUser.get(student.id);
             const hours = hoursByUser.get(student.id) ?? 0;
             return (
               <article
@@ -76,17 +85,18 @@ export default async function AdminStudentsPage() {
                   <div>
                     <dt className="text-xs font-semibold text-stone-400">최근 수업 요청</dt>
                     <dd className="mt-1">
-                      {request?.content ? (
-                        <p className="line-clamp-4 whitespace-pre-wrap rounded-xl bg-stone-50 p-3 text-stone-700">
-                          {request.content}
-                        </p>
+                      {request ? (
+                        <div className="rounded-xl bg-stone-50 p-3">
+                          <p className="text-xs text-stone-400">{formatWeekRange(request.week_start, "ko")}</p>
+                          <p className="mt-0.5 font-semibold text-stone-900">{request.main_topic}</p>
+                          {request.additional_details && (
+                            <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-stone-600">
+                              {request.additional_details}
+                            </p>
+                          )}
+                        </div>
                       ) : (
                         <Empty />
-                      )}
-                      {request?.content && (
-                        <p className="mt-1 text-xs text-stone-400">
-                          {formatTimestamp(request.updated_at, "ko")} 수정
-                        </p>
                       )}
                     </dd>
                   </div>

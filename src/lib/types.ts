@@ -23,11 +23,22 @@ export type AvailabilityRow = {
   updated_at: string;
 };
 
+/** One lesson request per student per week (week_start = Monday, Denver calendar). */
 export type TopicRequest = {
   id: string;
   user_id: string;
-  content: string;
+  week_start: string;
+  main_topic: string;
+  additional_details: string;
   updated_at: string;
+};
+
+export type AdminSeenArea = "schedule" | "requests";
+
+export type AdminSeen = {
+  admin_id: string;
+  area: AdminSeenArea;
+  seen_at: string;
 };
 
 export type Database = {
@@ -48,15 +59,22 @@ export type Database = {
       };
       topic_requests: {
         Row: TopicRequest;
-        Insert: Pick<TopicRequest, "user_id" | "content"> &
-          Partial<Pick<TopicRequest, "id" | "updated_at">>;
-        Update: Partial<Pick<TopicRequest, "content">>;
+        Insert: Pick<TopicRequest, "user_id" | "week_start" | "main_topic"> &
+          Partial<Pick<TopicRequest, "id" | "additional_details" | "updated_at">>;
+        Update: Partial<Pick<TopicRequest, "main_topic" | "additional_details">>;
+        Relationships: [];
+      };
+      admin_seen: {
+        Row: AdminSeen;
+        Insert: never; // written through mark_admin_seen()
+        Update: never;
         Relationships: [];
       };
     };
     Views: { [_ in never]: never };
     Functions: {
       is_admin: { Args: { uid?: string }; Returns: boolean };
+      mark_admin_seen: { Args: { seen_area: AdminSeenArea }; Returns: undefined };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

@@ -55,7 +55,8 @@ npm run dev                         # http://localhost:3000
 | `users` | Can read only their own row. Can update only `name`, `korean_level`, and `goals`. Changing `role`/`email` is blocked by column privileges. | Can read everyone |
 | `availability` | Can read and write their own rows, plus **read Jay's rows** (for recommended times) | Can read everyone. Can write only their own rows. |
 | Storage `avatars` | Can upload, replace, and delete only in their own folder (`<user id>/…`). `users.avatar_url` also stores only paths inside their own folder (DB constraint). | Can list everyone's photos |
-| `topic_requests` | Can read and write only their own row | Can read everyone |
+| `topic_requests` | Can read all of their own weekly requests, but can write **only this week and next week** (DB policy) | Can read everyone |
+| `admin_seen` | No access | Can read and write only their own row (the "last seen" time behind the navbar red dots) |
 
 Anonymous (not logged-in) access is blocked on every table.
 
