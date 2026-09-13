@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DU Korean Program
 
-## Getting Started
+A scheduling and lesson-management site for the University of Denver Korean Program. Jay is the admin, and students use it to share their availability, level, goals, and lesson requests.
 
-First, run the development server:
+**Stack:** Next.js 16 (App Router) · Supabase (Auth + Postgres + RLS) · Tailwind CSS v4 · TypeScript · Vercel
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 1. Supabase setup
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. **SQL Editor → New query**, paste all of [`supabase/schema.sql`](supabase/schema.sql), and run it. It creates:
+   - the `users`, `availability`, and `topic_requests` tables
+   - a trigger that creates a profile on sign-up. `blackskirtariel@gmail.com` gets the **admin** role automatically, and everyone else is a **student**.
+   - the Row Level Security policies (see "Permissions" below)
+   - the `avatars` Storage bucket for profile photos, plus its access policies
+   - If you've already run it before, just run the whole file again. That adds the new columns (`avatar_url`, `bio`) and the bucket.
+3. **Authentication → Sign In / Providers → Email.** For a class of 3, the simplest setup is to turn **"Confirm email" off**, which lets students log in right after signing up.
+   If you keep confirmation on, set **Authentication → URL Configuration → Site URL** to your deployed URL and add `https://<your-domain>/auth/confirm` to Redirect URLs.
+
+To make someone admin manually, run:
+```sql
+update public.users set role = 'admin' where email = 'someone@example.com';
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 2. Local development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cp .env.local.example .env.local   # then fill in the values from Project Settings → API
+npm install
+npm run dev                         # http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 3. Deploy to Vercel
 
-## Learn More
+1. Push this folder to GitHub and import it in Vercel. The framework preset is Next.js.
+2. Add the environment variables `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+3. Once deployed, enter the Vercel URL as the Site URL in Supabase.
 
-To learn more about Next.js, take a look at the following resources:
+## Features
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Route | Who | What |
+|---|---|---|
+| `/login`, `/signup` | everyone | Email + password auth. Sign-up collects a name. |
+| `/dashboard` | students (English UI) | When2Meet-style availability grid (drag to paint; press and hold then drag on phones), with times Jay is free outlined in blue and ★ for overlaps. Also Korean level and goals, and the lesson request. |
+| `/admin` | Jay (Korean UI) | Student cards: level, goals, latest request, and this week's hours |
+| `/admin/schedule` | Jay | Jay's own grid, a heatmap of all students (hover or tap for names), and recommended times (Jay + N students) |
+| `/admin/requests` | Jay | All lesson requests, filterable by student |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- The grid runs **Mon–Sun, 8:00 AM–9:00 PM, in 30-minute slots**. Every time is **America/Denver** wall-clock time (MDT/MST is labeled for each week).
+- `week_start` is the Monday of the week in Denver. You can look up to 8 weeks ahead.
 
-## Deploy on Vercel
+## Permissions (RLS)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Table | Student | Admin |
+|---|---|---|
+| `users` | Can read only their own row. Can update only `name`, `korean_level`, and `goals`. Changing `role`/`email` is blocked by column privileges. | Can read everyone |
+| `availability` | Can read and write their own rows, plus **read Jay's rows** (for recommended times) | Can read everyone. Can write only their own rows. |
+| Storage `avatars` | Can upload, replace, and delete only in their own folder (`<user id>/…`). `users.avatar_url` also stores only paths inside their own folder (DB constraint). | Can list everyone's photos |
+| `topic_requests` | Can read and write only their own row | Can read everyone |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Anonymous (not logged-in) access is blocked on every table.
+
+Beyond RLS, there are two more layers. `src/proxy.ts` refreshes the session and redirects signed-out users, and the server layouts (`requireStudent` / `requireAdmin`) enforce roles.
+
+## Font
+
+Freesentation is already first in the `--font-sans` stack in `src/app/globals.css`. Put the font files in `public/fonts/` and uncomment the `@font-face` block.
+
+## Structure
+
+```
+supabase/schema.sql            DB schema + RLS
+src/proxy.ts                   session refresh + auth redirects (Next 16 "proxy" = middleware)
+src/lib/supabase/*             browser / server / proxy clients
+src/lib/auth.ts                getProfile / requireStudent / requireAdmin
+src/lib/schedule.ts            days, slots, Denver-time week math, block grouping
+src/components/AvailabilityGrid.tsx   the drag-select grid
+src/app/dashboard/*            student dashboard
+src/app/admin/*                admin pages (students, schedule + heatmap, requests)
+```

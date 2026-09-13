@@ -1,26 +1,38 @@
 @import "tailwindcss";
 
+/*
+ * Freesentation (to be added later): drop the font files into public/fonts/
+ * and uncomment. It is already first in --font-sans below.
+ *
+ * @font-face {
+ *   font-family: "Freesentation";
+ *   src: url("/fonts/Freesentation-4Regular.woff2") format("woff2");
+ *   font-weight: 400;
+ *   font-display: swap;
+ * }
+ */
+
+@theme {
+  --font-sans: "Freesentation", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+
+  /* Softened DU crimson (#8B2332 reference) */
+  --color-brand-50: #fbf3f4;
+  --color-brand-100: #f6e4e7;
+  --color-brand-200: #ecc8ce;
+  --color-brand-300: #dea0aa;
+  --color-brand-400: #c9717f;
+  --color-brand-500: #b24c5d;
+  --color-brand-600: #9b3a4b;
+  --color-brand-700: #82303f;
+  --color-brand-800: #6b2935;
+  --color-brand-900: #5a2530;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  @apply bg-stone-50 font-sans text-stone-900 antialiased;
 }
