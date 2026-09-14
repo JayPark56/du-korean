@@ -182,6 +182,25 @@ export function formatTimestamp(timestamp: string, locale: Locale) {
   return locale === "ko" ? `${month}월 ${day}일 ${time}` : `${MONTHS_EN[month - 1]} ${day}, ${time}`;
 }
 
+/**
+ * slot key → ids of every student available at that time, in `studentIds` order.
+ * Students not in `studentIds` (e.g. the admin) are ignored.
+ */
+export function groupStudentsBySlot(
+  studentIds: readonly string[],
+  slotsByUser: ReadonlyMap<string, ReadonlySet<string>>,
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const id of studentIds) {
+    for (const key of slotsByUser.get(id) ?? []) {
+      const ids = map.get(key);
+      if (ids) ids.push(id);
+      else map.set(key, [id]);
+    }
+  }
+  return map;
+}
+
 export type TimeBlock = { day: Day; start: string; end: string; keys: string[] };
 
 /** Merges slot keys into contiguous blocks per day (e.g. Mon 10:00–11:30). */

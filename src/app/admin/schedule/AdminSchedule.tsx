@@ -12,6 +12,7 @@ import {
   currentWeekStart,
   dayLabel,
   formatTime,
+  groupStudentsBySlot,
   keysToSlots,
   setsEqual,
   slotKey,
@@ -112,17 +113,17 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
     }
   }
 
-  // slot key → ids of students available then
-  const studentsByKey = useMemo(() => {
-    const map = new Map<string, string[]>();
-    if (!students || !weekData) return map;
-    for (const student of students) {
-      weekData.slotsByUser.get(student.id)?.forEach((key) => {
-        map.set(key, [...(map.get(key) ?? []), student.id]);
-      });
-    }
-    return map;
-  }, [students, weekData]);
+  // slot key → ids of every student available then
+  const studentsByKey = useMemo(
+    () =>
+      students && weekData
+        ? groupStudentsBySlot(
+            students.map((s) => s.id),
+            weekData.slotsByUser,
+          )
+        : new Map<string, string[]>(),
+    [students, weekData],
+  );
 
   const totalStudents = students?.length ?? 0;
   const required = Math.min(Math.max(minStudents ?? totalStudents, 1), Math.max(totalStudents, 1));
@@ -293,9 +294,8 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
           ) : (
             <Heatmap
               weekStart={weekStart}
-              totalStudents={totalStudents}
+              students={students ?? []}
               studentsByKey={studentsByKey}
-              nameById={nameById}
               adminSlots={draft}
               recommended={recommendedKeys}
             />
