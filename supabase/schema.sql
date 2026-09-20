@@ -143,7 +143,11 @@ create trigger availability_set_updated_at
 drop trigger if exists topic_requests_set_updated_at on public.topic_requests;
 create trigger topic_requests_set_updated_at
   before update on public.topic_requests
-  for each row execute function public.set_updated_at();
+  for each row
+  -- Only the student's text counts as an edit; ticking "read" must not look like one.
+  when (old.main_topic is distinct from new.main_topic
+        or old.additional_details is distinct from new.additional_details)
+  execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------
 -- Auto-create a profile on sign-up. Jay's email becomes admin automatically.
@@ -361,3 +365,108 @@ drop policy if exists "avatars_delete_own" on storage.objects;
 create policy "avatars_delete_own" on storage.objects
   for delete to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- =====================================================================
+-- Fixed lessons, request read receipts, student deletion
+-- =====================================================================
+
+-- A lesson the admin pinned by hand from an overlapping slot. Students see
+-- only the lessons they are part of.
+create table if not exists public.fixed_lessons (
+  id          uuid primary key default gen_random_uuid(),
+  week_start  date not null,
+  day         text not null,
+  start_time  text not null,
+  end_time    text not null,
+  student_ids uuid[] not null default '{}',
+  note        text not null default '',
+  created_at  timestamptz not null default now()
+);
+
+alter table public.fixed_lessons drop constraint if exists fixed_lessons_week_monday_check;
+alter table public.fixed_lessons add constraint fixed_lessons_week_monday_check
+  check (extract(isodow from week_start) = 1);
+alter table public.fixed_lessons drop constraint if exists fixed_lessons_day_check;
+alter table public.fixed_lessons add constraint fixed_lessons_day_check
+  check (day in ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'));
+alter table public.fixed_lessons drop constraint if exists fixed_lessons_time_check;
+alter table public.fixed_lessons add constraint fixed_lessons_time_check
+  check (start_time ~ '^[0-2][0-9]:[0-5][0-9]$' and end_time ~ '^[0-2][0-9]:[0-5][0-9]$' and end_time > start_time);
+alter table public.fixed_lessons drop constraint if exists fixed_lessons_note_check;
+alter table public.fixed_lessons add constraint fixed_lessons_note_check check (char_length(note) <= 300);
+alter table public.fixed_lessons drop constraint if exists fixed_lessons_slot_key;
+alter table public.fixed_lessons add constraint fixed_lessons_slot_key unique (week_start, day, start_time);
+
+create index if not exists fixed_lessons_week_idx on public.fixed_lessons (week_start);
+
+-- When the admin ticked a lesson request as read (null = unread).
+alter table public.topic_requests add column if not exists read_at timestamptz;
+
+-- Admin-only: tick / untick a request. SECURITY DEFINER so students keep no
+-- write access to read_at at all.
+create or replace function public.set_request_read(request_id uuid, is_read boolean)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only the admin can mark requests as read';
+  end if;
+  update public.topic_requests
+     set read_at = case when is_read then now() else null end
+   where id = request_id;
+end;
+$$;
+
+revoke all on function public.set_request_read(uuid, boolean) from public, anon;
+grant execute on function public.set_request_read(uuid, boolean) to authenticated;
+
+-- Admin-only: delete a student account. public.users, availability, requests and
+-- fixed-lesson membership go with it; avatar files are removed by the app first.
+create or replace function public.delete_student(student_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only the admin can delete students';
+  end if;
+  if not exists (select 1 from public.users where id = student_id and role = 'student') then
+    raise exception 'Only student accounts can be deleted';
+  end if;
+
+  update public.fixed_lessons
+     set student_ids = array_remove(student_ids, student_id)
+   where student_id = any (student_ids);
+  delete from auth.users where id = student_id;
+end;
+$$;
+
+revoke all on function public.delete_student(uuid) from public, anon;
+grant execute on function public.delete_student(uuid) to authenticated;
+
+revoke all on public.fixed_lessons from anon;
+grant select, insert, update, delete on public.fixed_lessons to authenticated;
+
+alter table public.fixed_lessons enable row level security;
+
+drop policy if exists "fixed_lessons_select" on public.fixed_lessons;
+create policy "fixed_lessons_select" on public.fixed_lessons
+  for select to authenticated
+  using ((select public.is_admin()) or (select auth.uid()) = any (student_ids));
+
+drop policy if exists "fixed_lessons_admin_write" on public.fixed_lessons;
+create policy "fixed_lessons_admin_write" on public.fixed_lessons
+  for all to authenticated
+  using ((select public.is_admin()))
+  with check ((select public.is_admin()));
+
+-- The admin can clear a deleted student's photo.
+drop policy if exists "avatars_admin_delete" on storage.objects;
+create policy "avatars_admin_delete" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'avatars' and (select public.is_admin()));

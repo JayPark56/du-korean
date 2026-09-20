@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/auth";
 import { currentWeekStart, formatWeekRange, slotsToKeys } from "@/lib/schedule";
 import { createClient } from "@/lib/supabase/server";
 import type { TopicRequest } from "@/lib/types";
+import StudentCardActions from "./StudentCardActions";
 
 export const metadata: Metadata = { title: "학생 목록 · DU Korean Program" };
 
@@ -110,12 +111,19 @@ export default async function AdminStudentsPage() {
                   >
                     {hours > 0 ? `이번 주 ${hours}시간 가능` : "이번 주 시간 미입력"}
                   </span>
-                  <Link
-                    href={`/admin/requests?student=${student.id}`}
-                    className="font-semibold text-brand-700 hover:underline"
-                  >
-                    요청 보기 →
-                  </Link>
+                  <div className="flex items-center gap-1">
+                    <Link
+                      href={`/admin/requests?student=${student.id}`}
+                      className="font-semibold text-brand-700 hover:underline"
+                    >
+                      요청 보기 →
+                    </Link>
+                    <StudentCardActions
+                      studentId={student.id}
+                      studentName={student.name}
+                      avatarPath={student.avatar_url}
+                    />
+                  </div>
                 </div>
               </article>
             );

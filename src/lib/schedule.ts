@@ -201,6 +201,11 @@ export function groupStudentsBySlot(
   return map;
 }
 
+/** Slot keys covered by a time range on one day, e.g. 10:00–11:00 → two 30-minute keys. */
+export function slotKeysInRange(day: Day, start: string, end: string): string[] {
+  return TIMES.filter((time) => time >= start && time < end).map((time) => slotKey(day, time));
+}
+
 export type TimeBlock = { day: Day; start: string; end: string; keys: string[] };
 
 /** Merges slot keys into contiguous blocks per day (e.g. Mon 10:00–11:30). */

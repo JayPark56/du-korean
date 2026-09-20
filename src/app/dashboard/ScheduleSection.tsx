@@ -5,13 +5,19 @@ import AvailabilityGrid from "@/components/AvailabilityGrid";
 import WeekSwitcher from "@/components/WeekSwitcher";
 import { SectionCard, Skeleton, Spinner, StatusText, buttonClass } from "@/components/ui";
 import {
+  DAYS,
   addDays,
   currentWeekStart,
+  dayLabel,
+  formatTime,
   keysToSlots,
   setsEqual,
+  slotKeysInRange,
   slotsToKeys,
+  type Day,
 } from "@/lib/schedule";
 import { createClient } from "@/lib/supabase/client";
+import type { FixedLesson } from "@/lib/types";
 
 type Status = { type: "success" | "error"; message: string } | null;
 type WeekData = { week: string; jaySlots: Set<string>; error: string | null };
@@ -28,9 +34,22 @@ export default function ScheduleSection({ userId }: { userId: string }) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [fixedLessons, setFixedLessons] = useState<FixedLesson[]>([]);
 
   const loading = open && weekData?.week !== weekStart;
   const dirty = !setsEqual(draft, saved);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // RLS only returns lessons this student is part of.
+      const { data } = await supabase.from("fixed_lessons").select("*").eq("week_start", weekStart);
+      if (!cancelled) setFixedLessons(data ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, weekStart]);
 
   useEffect(() => {
     if (!open) return;
@@ -98,6 +117,12 @@ export default function ScheduleSection({ userId }: { userId: string }) {
   }
 
   const jaySlots = weekData?.week === weekStart ? weekData.jaySlots : new Set<string>();
+  const fixedKeys = new Set(
+    fixedLessons.flatMap((l) => slotKeysInRange(l.day as Day, l.start_time, l.end_time)),
+  );
+  const sortedFixed = [...fixedLessons].sort(
+    (a, b) => DAYS.indexOf(a.day as Day) - DAYS.indexOf(b.day as Day) || a.start_time.localeCompare(b.start_time),
+  );
   const overlapCount = [...draft].filter((k) => jaySlots.has(k)).length;
 
   return (
@@ -112,6 +137,24 @@ export default function ScheduleSection({ userId }: { userId: string }) {
         )
       }
     >
+      {sortedFixed.length > 0 && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+          <h3 className="text-sm font-semibold text-amber-900">
+            ✓ Confirmed lessons{open ? "" : " this week"}
+          </h3>
+          <ul className="mt-2 space-y-1 text-sm text-stone-700">
+            {sortedFixed.map((lesson) => (
+              <li key={lesson.id}>
+                <strong className="font-semibold">{dayLabel(DAYS.indexOf(lesson.day as Day), "en")}</strong>{" "}
+                {formatTime(lesson.start_time, "en")} – {formatTime(lesson.end_time, "en")}
+                <span className="text-stone-500"> with Jay</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-amber-800">Jay confirmed these times. They are outlined in the grid.</p>
+        </div>
+      )}
+
       {!open ? (
         <p className="text-sm text-stone-500">
           Open the grid to choose your available times for this week or upcoming weeks.
@@ -146,6 +189,7 @@ export default function ScheduleSection({ userId }: { userId: string }) {
                   label="Recommended (both free)"
                   star
                 />
+                <Legend swatch="shadow-[inset_0_0_0_2px_#d97706]" label="Confirmed lesson" />
               </div>
               {jaySlots.size === 0 && (
                 <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-600">
@@ -162,6 +206,7 @@ export default function ScheduleSection({ userId }: { userId: string }) {
                   setStatus(null);
                 }}
                 highlighted={jaySlots}
+                fixed={fixedKeys}
               />
               <p className="text-xs text-stone-400">
                 <span className="hidden sm:inline">Click a cell, or click and drag to select many.</span>

@@ -14,12 +14,14 @@ import {
   formatTime,
   groupStudentsBySlot,
   keysToSlots,
+  slotKeysInRange,
   setsEqual,
   slotKey,
   slotsToKeys,
   type Day,
 } from "@/lib/schedule";
 import { createClient } from "@/lib/supabase/client";
+import type { FixedLesson } from "@/lib/types";
 import Heatmap from "./Heatmap";
 
 type Status = { type: "success" | "error"; message: string } | null;
@@ -40,6 +42,9 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   const [minStudents, setMinStudents] = useState<number | null>(null);
+  const [fixedLessons, setFixedLessons] = useState<FixedLesson[]>([]);
+  const [fixBusy, setFixBusy] = useState<string | null>(null);
+  const [fixError, setFixError] = useState<string | null>(null);
 
   const loading = weekData?.week !== weekStart || students === null;
   const dirty = !setsEqual(draft, saved);
@@ -79,6 +84,22 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
       cancelled = true;
     };
   }, [supabase, weekStart, adminId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("fixed_lessons")
+        .select("*")
+        .eq("week_start", weekStart);
+      if (cancelled) return;
+      setFixedLessons(data ?? []);
+      setFixError(error?.message ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, weekStart]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -154,6 +175,52 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
     return { recommendedKeys, blocks };
   }, [draft, studentsByKey, required, totalStudents]);
 
+  // Manual only: a lesson is confirmed when the admin presses 픽스.
+  async function fixBlock(block: RecBlock) {
+    setFixBusy(`${block.day}-${block.start}`);
+    setFixError(null);
+    const { data, error } = await supabase
+      .from("fixed_lessons")
+      .insert({
+        week_start: weekStart,
+        day: block.day,
+        start_time: block.start,
+        end_time: block.end,
+        student_ids: block.studentIds,
+      })
+      .select("*")
+      .single();
+    setFixBusy(null);
+    if (error) setFixError(`픽스 실패: ${error.message}`);
+    else setFixedLessons((current) => [...current, data]);
+  }
+
+  async function unfixLesson(lesson: FixedLesson) {
+    setFixBusy(lesson.id);
+    setFixError(null);
+    const { error } = await supabase.from("fixed_lessons").delete().eq("id", lesson.id);
+    setFixBusy(null);
+    if (error) setFixError(`해제 실패: ${error.message}`);
+    else setFixedLessons((current) => current.filter((l) => l.id !== lesson.id));
+  }
+
+  const fixedKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const lesson of fixedLessons) {
+      for (const key of slotKeysInRange(lesson.day as Day, lesson.start_time, lesson.end_time)) keys.add(key);
+    }
+    return keys;
+  }, [fixedLessons]);
+
+  const lessonForBlock = (block: RecBlock) =>
+    fixedLessons.find(
+      (l) => l.day === block.day && l.start_time === block.start && l.end_time === block.end,
+    );
+
+  const sortedFixed = [...fixedLessons].sort(
+    (a, b) => DAYS.indexOf(a.day as Day) - DAYS.indexOf(b.day as Day) || a.start_time.localeCompare(b.start_time),
+  );
+
   const nameById = useMemo(() => new Map((students ?? []).map((s) => [s.id, s.name])), [students]);
   const submittedCount = students?.filter((s) => (weekData?.slotsByUser.get(s.id)?.size ?? 0) > 0).length ?? 0;
 
@@ -170,6 +237,63 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
           데이터를 불러오지 못했습니다: {loadError}
         </div>
       )}
+
+      <SectionCard
+        title="픽스된 수업"
+        description="추천 시간 옆의 “픽스” 버튼을 누른 수업만 확정됩니다. 확정하면 해당 학생들의 대시보드에도 표시돼요."
+      >
+        {fixError && (
+          <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {fixError}
+          </p>
+        )}
+        {sortedFixed.length === 0 ? (
+          <p className="text-sm text-stone-500">아직 픽스된 수업이 없습니다.</p>
+        ) : (
+          <ul className="space-y-2">
+            {sortedFixed.map((lesson) => {
+              const keys = slotKeysInRange(lesson.day as Day, lesson.start_time, lesson.end_time);
+              const stillFree = lesson.student_ids.filter((id) =>
+                keys.every((key) => (studentsByKey.get(key) ?? []).includes(id)),
+              );
+              return (
+                <li
+                  key={lesson.id}
+                  className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white font-bold text-amber-700 shadow-sm">
+                    {dayLabel(DAYS.indexOf(lesson.day as Day), "ko")}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-stone-900">
+                      {formatTime(lesson.start_time, "ko")} – {formatTime(lesson.end_time, "ko")}
+                    </div>
+                    <div className="truncate text-xs text-stone-600">
+                      {lesson.student_ids.length === 0
+                        ? "학생 없음"
+                        : lesson.student_ids.map((id) => nameById.get(id) ?? "삭제된 학생").join(", ")}
+                    </div>
+                    {stillFree.length !== lesson.student_ids.length && (
+                      <div className="mt-0.5 text-xs font-medium text-amber-700">
+                        ⚠ 일부 학생의 가능 시간이 바뀌었어요
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => unfixLesson(lesson)}
+                    disabled={fixBusy !== null}
+                    className={`${buttonClass.ghost} shrink-0 text-xs`}
+                  >
+                    {fixBusy === lesson.id && <Spinner className="size-3.5" />}
+                    해제
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SectionCard>
 
       <SectionCard
         title="추천 수업 시간"
@@ -219,7 +343,7 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white font-bold text-blue-700 shadow-sm">
                   {dayLabel(DAYS.indexOf(block.day), "ko")}
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-stone-900">
                     {formatTime(block.start, "ko")} – {formatTime(block.end, "ko")}
                   </div>
@@ -227,6 +351,21 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
                     Jay + {block.studentIds.length}명 · {block.studentIds.map((id) => nameById.get(id)).join(", ")}
                   </div>
                 </div>
+                {lessonForBlock(block) ? (
+                  <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                    픽스됨
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fixBlock(block)}
+                    disabled={fixBusy !== null}
+                    className={`${buttonClass.secondary} shrink-0 px-3 py-1.5 text-xs`}
+                  >
+                    {fixBusy === `${block.day}-${block.start}` && <Spinner className="size-3.5" />}
+                    픽스
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -298,6 +437,7 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
               studentsByKey={studentsByKey}
               adminSlots={draft}
               recommended={recommendedKeys}
+              fixedKeys={fixedKeys}
             />
           )}
         </SectionCard>

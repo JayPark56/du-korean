@@ -57,6 +57,7 @@ export default function AvailabilityGrid({
   selected,
   onChange,
   highlighted,
+  fixed,
   locale = "en",
   disabled = false,
 }: {
@@ -65,6 +66,8 @@ export default function AvailabilityGrid({
   onChange: (next: Set<string>) => void;
   /** Slots to outline, e.g. times when Jay is available. */
   highlighted?: Set<string>;
+  /** Confirmed lesson slots; outlined in amber and never covered by `highlighted`. */
+  fixed?: Set<string>;
   locale?: Locale;
   disabled?: boolean;
 }) {
@@ -249,6 +252,7 @@ export default function AvailabilityGrid({
                 const key = slotKey(day, time);
                 const isOn = shown.has(key);
                 const isHighlighted = highlighted?.has(key) ?? false;
+                const isFixed = fixed?.has(key) ?? false;
                 return (
                   <div
                     key={key}
@@ -261,14 +265,21 @@ export default function AvailabilityGrid({
                     className={`relative h-7 cursor-pointer border-l border-stone-200 transition-colors duration-75 sm:h-6 ${
                       onHour ? "border-t border-t-stone-200" : "border-t border-t-stone-100"
                     } ${isOn ? "bg-emerald-500 hover:bg-emerald-600" : "hover:bg-emerald-50"} ${
-                      isHighlighted
-                        ? isOn
-                          ? "shadow-[inset_0_0_0_2px_#1d4ed8]"
-                          : "bg-sky-50 shadow-[inset_0_0_0_2px_#60a5fa]"
-                        : ""
+                      isFixed
+                        ? "shadow-[inset_0_0_0_2px_#d97706]"
+                        : isHighlighted
+                          ? isOn
+                            ? "shadow-[inset_0_0_0_2px_#1d4ed8]"
+                            : "bg-sky-50 shadow-[inset_0_0_0_2px_#60a5fa]"
+                          : ""
                     }`}
                   >
-                    {isOn && isHighlighted && (
+                    {isFixed && (
+                      <span className="pointer-events-none absolute inset-0 grid place-items-center text-[11px] leading-none text-amber-700">
+                        ✓
+                      </span>
+                    )}
+                    {isOn && isHighlighted && !isFixed && (
                       <span className="pointer-events-none absolute inset-0 grid place-items-center text-[11px] leading-none text-white">
                         ★
                       </span>

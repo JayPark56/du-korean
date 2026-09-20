@@ -41,9 +41,9 @@ npm run dev                         # http://localhost:3000
 |---|---|---|
 | `/login`, `/signup` | everyone | Email + password auth. Sign-up collects a name. |
 | `/dashboard` | students (English UI) | When2Meet-style availability grid (drag to paint; press and hold then drag on phones), with times Jay is free outlined in blue and ★ for overlaps. Also Korean level and goals, and the lesson request. |
-| `/admin` | Jay (Korean UI) | Student cards: level, goals, latest request, and this week's hours |
-| `/admin/schedule` | Jay | Jay's own grid, a heatmap of all students (hover or tap for names), and recommended times (Jay + N students) |
-| `/admin/requests` | Jay | All lesson requests, filterable by student |
+| `/admin` | Jay (Korean UI) | Student cards: level, goals, latest request, this week's hours, and **delete student** |
+| `/admin/schedule` | Jay | Jay's own grid, a heatmap of all students (hover or tap for names, or click a name to see just that student), recommended times (Jay + N students), and a **픽스** button that confirms a lesson |
+| `/admin/requests` | Jay | All lesson requests, filterable by week and student, with a manual **읽음 표시** tick |
 
 - The grid runs **Mon–Sun, 8:00 AM–9:00 PM, in 30-minute slots**. Every time is **America/Denver** wall-clock time (MDT/MST is labeled for each week).
 - `week_start` is the Monday of the week in Denver. You can look up to 8 weeks ahead.
@@ -55,7 +55,8 @@ npm run dev                         # http://localhost:3000
 | `users` | Can read only their own row. Can update only `name`, `korean_level`, and `goals`. Changing `role`/`email` is blocked by column privileges. | Can read everyone |
 | `availability` | Can read and write their own rows, plus **read Jay's rows** (for recommended times) | Can read everyone. Can write only their own rows. |
 | Storage `avatars` | Can upload, replace, and delete only in their own folder (`<user id>/…`). `users.avatar_url` also stores only paths inside their own folder (DB constraint). | Can list everyone's photos |
-| `topic_requests` | Can read all of their own weekly requests, but can write **only this week and next week** (DB policy) | Can read everyone |
+| `topic_requests` | Can read all of their own weekly requests, but can write **only this week and next week** (DB policy). The read tick is visible but not writable. | Can read everyone; ticks "read" via `set_request_read()` |
+| `fixed_lessons` | Can read only the lessons they are part of; cannot create or change any | Full control (the "픽스" button) |
 | `admin_seen` | No access | Can read and write only their own row (the "last seen" time behind the navbar red dots) |
 
 Anonymous (not logged-in) access is blocked on every table.

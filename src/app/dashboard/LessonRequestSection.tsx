@@ -148,6 +148,11 @@ export default function LessonRequestSection({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-stone-400">
             {saved ? `Last saved ${formatTimestamp(saved.updated_at, "en")}` : "Not submitted for this week yet"}
+            {saved?.read_at && (
+              <span className="ml-2 font-medium text-emerald-600">
+                Jay read this ✓ {formatTimestamp(saved.read_at, "en")}
+              </span>
+            )}
           </p>
           <div className="flex items-center gap-3">
             {dirty && !saving && <span className="text-sm text-amber-600">Unsaved changes</span>}
@@ -166,7 +171,10 @@ export default function LessonRequestSection({
           <ul className="space-y-3">
             {pastRequests.map((r) => (
               <li key={r.id} className="rounded-xl bg-stone-50 p-4">
-                <p className="text-xs text-stone-400">{formatWeekRange(r.week_start, "en")}</p>
+                <p className="text-xs text-stone-400">
+                  {formatWeekRange(r.week_start, "en")}
+                  {r.read_at && <span className="ml-2 font-medium text-emerald-600">Jay read this ✓</span>}
+                </p>
                 <p className="mt-1 font-semibold text-stone-900">{r.main_topic}</p>
                 {r.additional_details && (
                   <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-stone-600">

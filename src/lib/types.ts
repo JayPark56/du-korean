@@ -31,6 +31,20 @@ export type TopicRequest = {
   main_topic: string;
   additional_details: string;
   updated_at: string;
+  /** When the admin ticked it as read; null = unread. */
+  read_at: string | null;
+};
+
+/** A lesson the admin confirmed ("픽스") for a specific slot. */
+export type FixedLesson = {
+  id: string;
+  week_start: string;
+  day: string;
+  start_time: string;
+  end_time: string;
+  student_ids: string[];
+  note: string;
+  created_at: string;
 };
 
 export type AdminSeenArea = "schedule" | "requests";
@@ -64,6 +78,13 @@ export type Database = {
         Update: Partial<Pick<TopicRequest, "main_topic" | "additional_details">>;
         Relationships: [];
       };
+      fixed_lessons: {
+        Row: FixedLesson;
+        Insert: Pick<FixedLesson, "week_start" | "day" | "start_time" | "end_time" | "student_ids"> &
+          Partial<Pick<FixedLesson, "id" | "note" | "created_at">>;
+        Update: Partial<Pick<FixedLesson, "student_ids" | "note">>;
+        Relationships: [];
+      };
       admin_seen: {
         Row: AdminSeen;
         Insert: never; // written through mark_admin_seen()
@@ -75,6 +96,8 @@ export type Database = {
     Functions: {
       is_admin: { Args: { uid?: string }; Returns: boolean };
       mark_admin_seen: { Args: { seen_area: AdminSeenArea }; Returns: undefined };
+      set_request_read: { Args: { request_id: string; is_read: boolean }; Returns: undefined };
+      delete_student: { Args: { student_id: string }; Returns: undefined };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

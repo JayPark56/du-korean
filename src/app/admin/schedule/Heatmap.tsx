@@ -28,6 +28,7 @@ export default function Heatmap({
   studentsByKey,
   adminSlots,
   recommended,
+  fixedKeys,
 }: {
   weekStart: string;
   students: Student[];
@@ -35,6 +36,8 @@ export default function Heatmap({
   studentsByKey: Map<string, string[]>;
   adminSlots: Set<string>;
   recommended: Set<string>;
+  /** Slots covered by a confirmed ("픽스") lesson. */
+  fixedKeys: Set<string>;
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
@@ -101,6 +104,7 @@ export default function Heatmap({
           Jay {jay ? "가능" : "불가"}
           {isRecommended(key) && (focused ? " · ★ 겹침" : " · ★ 추천")}
         </div>
+        {fixedKeys.has(key) && <div className="mt-0.5 text-amber-300">✓ 픽스된 수업</div>}
       </>
     );
   };
@@ -168,6 +172,9 @@ export default function Heatmap({
         <span className="inline-flex items-center gap-1.5">
           <span className="size-4 rounded shadow-[inset_0_0_0_2px_#1d4ed8]" /> {focused ? "Jay와 겹침" : "추천 시간"}
         </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-4 rounded shadow-[inset_0_0_0_2px_#d97706]" /> 픽스된 수업
+        </span>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-stone-200">
@@ -199,6 +206,7 @@ export default function Heatmap({
                   const ratio = total > 0 ? count / total : 0;
                   const isJay = adminSlots.has(key);
                   const isRec = isRecommended(key);
+                  const isFixed = fixedKeys.has(key);
                   return (
                     <button
                       key={key}
@@ -206,7 +214,7 @@ export default function Heatmap({
                       role="gridcell"
                       data-slot={key}
                       data-count={count}
-                      aria-label={`${slotTitle(key)}, ${focused ? `${focused.name} ${count ? "가능" : "불가"}` : `학생 ${count}명`}${isJay ? ", Jay 가능" : ""}`}
+                      aria-label={`${slotTitle(key)}, ${focused ? `${focused.name} ${count ? "가능" : "불가"}` : `학생 ${count}명`}${isJay ? ", Jay 가능" : ""}${isFixed ? ", 픽스된 수업" : ""}`}
                       onMouseEnter={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect();
                         setHover({ key, x: rect.left + rect.width / 2, y: rect.top });
@@ -219,7 +227,7 @@ export default function Heatmap({
                       onClick={() => setPinned((p) => (p === key ? null : key))}
                       className={`relative h-7 border-l border-stone-200 outline-none transition sm:h-6 ${
                         onHour ? "border-t border-t-stone-200" : "border-t border-t-stone-100"
-                      } ${isRec ? "shadow-[inset_0_0_0_2px_#1d4ed8]" : ""} ${
+                      } ${isFixed ? "shadow-[inset_0_0_0_2px_#d97706]" : isRec ? "shadow-[inset_0_0_0_2px_#1d4ed8]" : ""} ${
                         pinned === key ? "ring-2 ring-stone-900 ring-inset" : ""
                       } focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset`}
                       style={count > 0 ? { backgroundColor: `rgba(${BRAND_RGB}, ${0.1 + ratio * 0.8})` } : undefined}
