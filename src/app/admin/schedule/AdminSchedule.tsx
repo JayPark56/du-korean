@@ -22,6 +22,7 @@ import {
 } from "@/lib/schedule";
 import { createClient } from "@/lib/supabase/client";
 import type { FixedLesson } from "@/lib/types";
+import FixLessonDialog from "./FixLessonDialog";
 import Heatmap from "./Heatmap";
 
 type Status = { type: "success" | "error"; message: string } | null;
@@ -45,6 +46,10 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
   const [fixedLessons, setFixedLessons] = useState<FixedLesson[]>([]);
   const [fixBusy, setFixBusy] = useState<string | null>(null);
   const [fixError, setFixError] = useState<string | null>(null);
+  // Which students a lesson is for: asked whenever more than one student overlaps.
+  const [picker, setPicker] = useState<
+    { kind: "new"; block: RecBlock } | { kind: "edit"; lesson: FixedLesson } | null
+  >(null);
 
   const loading = weekData?.week !== weekStart || students === null;
   const dirty = !setsEqual(draft, saved);
@@ -146,6 +151,7 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
     [students, weekData],
   );
 
+  const nameById = useMemo(() => new Map((students ?? []).map((s) => [s.id, s.name])), [students]);
   const totalStudents = students?.length ?? 0;
   const required = Math.min(Math.max(minStudents ?? totalStudents, 1), Math.max(totalStudents, 1));
 
@@ -176,7 +182,7 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
   }, [draft, studentsByKey, required, totalStudents]);
 
   // Manual only: a lesson is confirmed when the admin presses 픽스.
-  async function fixBlock(block: RecBlock) {
+  async function fixBlock(block: RecBlock, studentIds: string[]) {
     setFixBusy(`${block.day}-${block.start}`);
     setFixError(null);
     const { data, error } = await supabase
@@ -186,13 +192,39 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
         day: block.day,
         start_time: block.start,
         end_time: block.end,
-        student_ids: block.studentIds,
+        student_ids: studentIds,
       })
       .select("*")
       .single();
     setFixBusy(null);
     if (error) setFixError(`픽스 실패: ${error.message}`);
     else setFixedLessons((current) => [...current, data]);
+  }
+
+  async function updateLessonStudents(lesson: FixedLesson, studentIds: string[]) {
+    setFixBusy(lesson.id);
+    setFixError(null);
+    const { data, error } = await supabase
+      .from("fixed_lessons")
+      .update({ student_ids: studentIds })
+      .eq("id", lesson.id)
+      .select("*")
+      .single();
+    setFixBusy(null);
+    if (error) setFixError(`학생 변경 실패: ${error.message}`);
+    else setFixedLessons((current) => current.map((l) => (l.id === lesson.id ? data : l)));
+  }
+
+  /** Students free for the whole lesson, plus whoever is already on it. */
+  function candidatesFor(day: Day, start: string, end: string, current: string[]) {
+    const keys = slotKeysInRange(day, start, end);
+    const free = (students ?? [])
+      .filter((s) => keys.every((key) => (studentsByKey.get(key) ?? []).includes(s.id)))
+      .map((s) => s.id);
+    return [...new Set([...free, ...current])].map((id) => ({
+      id,
+      name: nameById.get(id) ?? "삭제된 학생",
+    }));
   }
 
   async function unfixLesson(lesson: FixedLesson) {
@@ -221,7 +253,6 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
     (a, b) => DAYS.indexOf(a.day as Day) - DAYS.indexOf(b.day as Day) || a.start_time.localeCompare(b.start_time),
   );
 
-  const nameById = useMemo(() => new Map((students ?? []).map((s) => [s.id, s.name])), [students]);
   const submittedCount = students?.filter((s) => (weekData?.slotsByUser.get(s.id)?.size ?? 0) > 0).length ?? 0;
 
   const loadError = studentsError ?? (weekData?.week === weekStart ? weekData.error : null);
@@ -279,15 +310,25 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
                       </div>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => unfixLesson(lesson)}
-                    disabled={fixBusy !== null}
-                    className={`${buttonClass.ghost} shrink-0 text-xs`}
-                  >
-                    {fixBusy === lesson.id && <Spinner className="size-3.5" />}
-                    해제
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setPicker({ kind: "edit", lesson })}
+                      disabled={fixBusy !== null}
+                      className={`${buttonClass.ghost} text-xs`}
+                    >
+                      학생 변경
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => unfixLesson(lesson)}
+                      disabled={fixBusy !== null}
+                      className={`${buttonClass.ghost} text-xs`}
+                    >
+                      {fixBusy === lesson.id && <Spinner className="size-3.5" />}
+                      해제
+                    </button>
+                  </div>
                 </li>
               );
             })}
@@ -358,7 +399,11 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => fixBlock(block)}
+                    onClick={() =>
+                      block.studentIds.length > 1
+                        ? setPicker({ kind: "new", block })
+                        : fixBlock(block, block.studentIds)
+                    }
                     disabled={fixBusy !== null}
                     className={`${buttonClass.secondary} shrink-0 px-3 py-1.5 text-xs`}
                   >
@@ -442,6 +487,35 @@ export default function AdminSchedule({ adminId }: { adminId: string }) {
           )}
         </SectionCard>
       </div>
+
+      {picker && (
+        <FixLessonDialog
+          title={
+            picker.kind === "new"
+              ? `${dayLabel(DAYS.indexOf(picker.block.day), "ko")} ${formatTime(picker.block.start, "ko")} – ${formatTime(picker.block.end, "ko")}`
+              : `${dayLabel(DAYS.indexOf(picker.lesson.day as Day), "ko")} ${formatTime(picker.lesson.start_time, "ko")} – ${formatTime(picker.lesson.end_time, "ko")}`
+          }
+          candidates={
+            picker.kind === "new"
+              ? candidatesFor(picker.block.day, picker.block.start, picker.block.end, picker.block.studentIds)
+              : candidatesFor(
+                  picker.lesson.day as Day,
+                  picker.lesson.start_time,
+                  picker.lesson.end_time,
+                  picker.lesson.student_ids,
+                )
+          }
+          initialSelected={picker.kind === "new" ? picker.block.studentIds : picker.lesson.student_ids}
+          confirmLabel={picker.kind === "new" ? "픽스" : "저장"}
+          onCancel={() => setPicker(null)}
+          onConfirm={(ids) => {
+            const target = picker;
+            setPicker(null);
+            if (target.kind === "new") fixBlock(target.block, ids);
+            else updateLessonStudents(target.lesson, ids);
+          }}
+        />
+      )}
     </div>
   );
 }
